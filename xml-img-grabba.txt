@@ -1,0 +1,91 @@
+import os
+import requests
+import time
+from tqdm import tqdm
+import pyfiglet
+from colorama import Fore, Style, init
+from urllib.parse import urlparse, urlunparse
+from bs4 import BeautifulSoup
+
+# Initialize colorama
+init(autoreset=True)
+
+# Display ASCII Art Title
+def ascii_art():
+    ascii_title = pyfiglet.figlet_format("XML Image Grabba", font='isometric1')
+    print(Fore.GREEN + ascii_title)
+    print(Fore.YELLOW + "XML Image Grabber 🖼️  - Grabs Images from Sitemap XML\n")
+
+ascii_art()
+
+# Prompt for rate limit
+rate_limit_delay = int(input(Fore.YELLOW + "Enter the rate limit in seconds between requests (e.g., 1): "))
+
+# Fetch sitemap XML
+def get_valid_sitemap_url():
+    while True:
+        sitemap_url = input(Fore.YELLOW + "Enter the URL of the sitemap XML: ").strip()
+        try:
+            response = requests.get(sitemap_url)
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as e:
+            print(Fore.RED + f"Error fetching the sitemap: {e}. Please try again.")
+
+# Parse sitemap XML
+sitemap_xml = get_valid_sitemap_url()
+soup = BeautifulSoup(sitemap_xml, "xml")
+
+# Collect image URLs and titles
+image_items = [
+    (url.find("image:loc").text, url.find("image:title").text.replace(" ", "_"))
+    for url in soup.find_all("url")
+    if url.find("image:loc") and url.find("image:title")
+]
+
+# Progress bars
+total_images = len(image_items)
+colors = [Fore.RED, Fore.GREEN, Fore.YELLOW, Fore.BLUE, Fore.MAGENTA, Fore.CYAN]
+total_progress_bar = tqdm(total=total_images, desc="Overall Progress", unit="image", colour="cyan")
+print(Fore.GREEN + f"Found {total_images} images to download.\n")
+
+for idx, (image_url, title) in enumerate(image_items):
+    color = colors[idx % len(colors)]
+    
+    # Display download progress for each image
+    single_image_bar = tqdm(
+        desc=f"{color}Downloading {title}",
+        total=100,
+        ncols=80,
+        bar_format='{desc}: |{bar}| {percentage:.0f}%',
+        leave=False,
+        colour=colors[idx % len(colors)]
+    )
+
+    filename = f"{title}.jpg"
+    try:
+        img_response = requests.get(image_url, stream=True)
+        img_response.raise_for_status()
+
+        total_size = int(img_response.headers.get('content-length', 0))
+        with open(os.path.join("downloaded_images", filename), "wb") as file:
+            for data in img_response.iter_content(1024):
+                file.write(data)
+                single_image_bar.update(len(data) * 100 / total_size)
+
+        print(color + f"Downloaded: {filename} ({total_size / (1024 * 1024):.2f} MB)")
+    except requests.RequestException as e:
+        print(Fore.RED + f"Failed to download image: {image_url}. Error: {e}")
+
+    single_image_bar.close()
+    total_progress_bar.update(1)
+
+    # Custom rate limit countdown
+    print(Fore.MAGENTA + "Rate limit delay: ", end="")
+    for sec in range(rate_limit_delay, 0, -1):
+        print(f"{sec}s ", end="", flush=True)
+        time.sleep(1)
+    print("\n")
+
+total_progress_bar.close()
+print(Fore.GREEN + "\nAll images downloaded successfully!")
